@@ -1,0 +1,5 @@
+exp_*.*
+__pycache__/
+unsloth_compiled_cache/
+wandb/
+results/training*
