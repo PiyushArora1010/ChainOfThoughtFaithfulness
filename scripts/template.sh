@@ -1,6 +1,6 @@
 #!/bin/bash
 export CUDA_VISIBLE_DEVICES=0
-export HF_HOME="/data/sandbar/.cache"
+export HF_HOME="./"
 
 SAVE_DIR="./"
 MODEL_TAG="Qwen/Qwen3-32B"

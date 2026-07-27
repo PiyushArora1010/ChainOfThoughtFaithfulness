@@ -5,7 +5,7 @@ PORT=$2
 DEVICES=$3
 
 export CUDA_VISIBLE_DEVICES=$DEVICES
-export HF_HOME="/data/sandbar/.cache/"
+export HF_HOME="./"
 
 python -m vllm.entrypoints.openai.api_server \
 --model $MODEL \

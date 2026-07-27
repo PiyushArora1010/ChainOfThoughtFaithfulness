@@ -1,8 +1,8 @@
 #!/bin/bash
 export CUDA_VISIBLE_DEVICES=2,3,4,5
-export HF_HOME="/data/sandbar/.cache/"
+export HF_HOME="./"
 
-SAVE_DIR="/data/sandbar/saved_models"
+SAVE_DIR="./"
 MODEL_TAG="Qwen/Qwen3-4B"
 MODEL_SAVE_TAG="Qwen3_4B"
 

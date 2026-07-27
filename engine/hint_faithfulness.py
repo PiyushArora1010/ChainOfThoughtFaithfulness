@@ -76,7 +76,6 @@ class HintFaithfulnessEngine(BaseEngine):
                             
                             "gt": GTs[i],
                             "hinted_answer": hinted_answers[i]
-                            "hinted_answer": hinted_answers[i]
                         }
                     )
                     + "\n"
