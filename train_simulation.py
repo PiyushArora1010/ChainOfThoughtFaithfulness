@@ -25,6 +25,8 @@ async def reward_faithfulness_async(prompts, completions, **kwargs):
         counterfactual_prompts_all[i]
         for i in range(0, len(completions), engine.completions_per_prompt)
     ]
+    print0(f"Unique counterfactual prompts: {len(counterfactual_prompts)}", local_rank=engine.local_rank)
+    print0(f"Number of rollouts per counterfactual prompt: {engine.completions_per_prompt}", local_rank=engine.local_rank)
 
     # These are cheap/CPU-only, fine to do up front
     original_cots = engine._get_reasoning_from_responses(completions)
@@ -56,6 +58,35 @@ async def reward_faithfulness_async(prompts, completions, **kwargs):
     counterfactual_answers = [
         ans for ans in counterfactual_answers for _ in range(engine.completions_per_prompt)
     ]  # repeat answers per completion
+
+    # Update EMAs
+    faithful_switch = sum(1 for i in range(len(original_answers)) if counterfactual_answers[i] != original_answers[i] and simulated_cot_answers[i] == counterfactual_answers[i])
+    faithful_non_switch = sum(1 for i in range(len(original_answers)) if counterfactual_answers[i] == original_answers[i] and simulated_cot_answers[i] == counterfactual_answers[i])
+    answer_switch_count = sum(1 for i in range(len(original_answers)) if counterfactual_answers[i] != original_answers[i])
+
+    if engine.faithfulness_switch_weight is None:
+        engine.faithfulness_switch_weight = faithful_switch / len(original_answers)
+    else:
+        engine.faithfulness_switch_weight = (
+            engine.alpha * engine.faithfulness_switch_weight
+            + (1 - engine.alpha) * (faithful_switch / len(original_answers))
+        )
+
+    if engine.faithfulness_non_switch_weight is None:
+        engine.faithfulness_non_switch_weight = faithful_non_switch / len(original_answers)
+    else:
+        engine.faithfulness_non_switch_weight = (
+            engine.alpha * engine.faithfulness_non_switch_weight
+            + (1 - engine.alpha) * (faithful_non_switch / len(original_answers))
+        )
+
+    if engine.answer_switch_ema is None:
+        engine.answer_switch_ema = answer_switch_count / len(original_answers)
+    else:
+        engine.answer_switch_ema = (
+            engine.alpha * engine.answer_switch_ema
+            + (1 - engine.alpha) * (answer_switch_count / len(original_answers))
+        )
 
     # Faithfulness reward computation
     rewards = engine._reward(counterfactual_answers, simulated_cot_answers, original_answers)
@@ -198,6 +229,10 @@ async def reward_faithfulness_async(prompts, completions, **kwargs):
         wandb.log({"train/faithfulness_non_switch": engine.faithfulness_non_switch})
 
         end = time.time()
+        print0(f"Original Answers: {original_answers}", local_rank=engine.local_rank)
+        print0(f"Counterfactual Answers: {counterfactual_answers}", local_rank=engine.local_rank)
+        print0(f"Simulated CoT Answers: {simulated_cot_answers}", local_rank=engine.local_rank)
+        print0(f"Faithfulness Rewards: {rewards}", local_rank=engine.local_rank)
         print0(
             f"\n\n****Total reward_faithfulness time: {end - start:.2f} seconds****\n",
             local_rank=engine.local_rank,
@@ -226,14 +261,20 @@ async def reward_base_answer_async(prompts, completions, **kwargs):
 
     gts = kwargs["gt"]
     original_answers = engine._get_answers_from_responses(completions)
-    base_responses, base_answers = await engine._get_base_responses(prompts)
+
+    unique_prompts = [
+        prompts[i] for i in range(0, len(completions), engine.completions_per_prompt)
+    ]
+    base_responses_unique, base_answers_unique = await engine._get_base_responses(unique_prompts)
+    base_responses = [r for r in base_responses_unique for _ in range(engine.completions_per_prompt)]
+    base_answers = [a for a in base_answers_unique for _ in range(engine.completions_per_prompt)]
 
     rewards = []    
     for i in range(len(completions)):
-        if base_answers[i] == original_answers[i] and original_answers[i] == gts[i]:
-            rewards.append(1.0)
-        elif base_answers[i] == original_answers[i]:
+        if base_answers[i] == original_answers[i]:
             rewards.append(0.5)
+            if original_answers[i] == gts[i]:
+                rewards[-1] += 0.5  # Bonus for matching ground truth
         else:
             rewards.append(0.0)
 
@@ -281,14 +322,14 @@ async def reward_base_answer_async(prompts, completions, **kwargs):
     return rewards
 
 def reward_format(prompts, completions, **kwargs):
-    global tokenizer
+    global tokenizer, engine
     rewards = []
     avg_token_len = 0
     for completion in completions:
         num_tokens = len(tokenizer.encode(completion))
         avg_token_len += num_tokens
         if "<reasoning>" in completion and "</reasoning>" in completion and "<answer>" in completion and "</answer>" in completion:
-            rewards.append(1.0 * (num_tokens <= 512))  # Reward only if the completion is well-formatted and within token limit
+            rewards.append(1.0 * (num_tokens <= engine.max_seq_length))  # Reward only if the completion is well-formatted and within token limit
         else:
             rewards.append(0.0)
     print0(f"\n\n****Average token length of completions: {avg_token_len / len(completions):.2f} tokens****\n", local_rank=engine.local_rank)
@@ -307,8 +348,8 @@ parser.add_argument('--base_model_url', type=str, default="http://localhost:3317
 
 # Model settings
 parser.add_argument('--model_tag', type=str, default='Qwen/Qwen3-4B')
-parser.add_argument('--max_prompt_length', type=int, default=8192)
-parser.add_argument('--max_seq_length', type=int, default=8192)
+parser.add_argument('--max_prompt_length', type=int, default=512)
+parser.add_argument('--max_seq_length', type=int, default=512)
 parser.add_argument('--model_temperature', type=float, default=1)
 parser.add_argument('--model_batch_size', type=int, default=8)
 parser.add_argument('--model_thinking', action='store_true')
@@ -366,8 +407,6 @@ if __name__ == '__main__':
 
     print0(f"Train dataset size: {len(train_dataset)}", local_rank=engine.local_rank)
     print0(f"Validation dataset size: {len(val_dataset)}", local_rank=engine.local_rank)
-
-    # breakpoint()
 
     max_prompt_length = args.max_prompt_length
     max_seq_length = args.max_seq_length
@@ -433,12 +472,21 @@ if __name__ == '__main__':
         # },
 
         # GRPO-specific
-        beta=0.0,
-        loss_type="grpo",
+        beta=0.01,
+        loss_type="luspo",
+        epsilon=2e-3, # section 5.1 of the paper
+        epsilon_high=2.5e-3, # section 5.1 of the paper
         importance_sampling_level="sequence",
         mask_truncated_completions=True,
-        reward_weights=args.reward_weights if hasattr(args, "reward_weights") else [1.0, 1.0, 1.0],
+        reward_weights=args.reward_weights if hasattr(args, "reward_weights") else [1.0, 1.0, 0.1],
         multi_objective_aggregation="normalize_then_sum",
+
+        # entropy_coef=0.02,
+        # use_adaptive_entropy=True,
+        # entropy_target=0.35,        # calibrated near your actual step-0 entropy (~0.45), not 5.0
+        # entropy_coef_delta=0.001,   # slower ramp given tight epsilon clip
+        # entropy_coef_min=0.0,
+        # entropy_coef_max=0.15,      # prevent entropy term from dominating your bounded [0,1.3] reward
 
         gradient_checkpointing = False,
         # gradient_checkpointing_kwargs={"use_reentrant": False},

@@ -140,7 +140,8 @@ Format Instructions:
 1. Put your reasoning inside <reasoning></reasoning> tags.
 2. Put your final answer inside <answer></answer> tags.
 3. The final answer must contain **ONLY** a single letter (A or B).
-4. You must pick exactly one answer choice.
+4. Keep the reasoning concise.
+5. You must pick exactly one answer choice.
 
 Your output must exactly follow this format:
 

@@ -28,6 +28,10 @@ class TrainSimulationEngine(BaseEngine):
         self.alpha = 0.99
         self.faithfulness_switch = None
         self.faithfulness_non_switch = None
+
+        self.faithfulness_switch_weight = None
+        self.faithfulness_non_switch_weight = None
+
         self._get_implied_client()
         self._get_base_client()
 
@@ -102,7 +106,7 @@ class TrainSimulationEngine(BaseEngine):
         if self.lora:
             lora_config = LoraConfig(
                 r=self.lora_rank,
-                lora_alpha=self.lora_rank * 2,
+                lora_alpha=self.lora_rank,
                 target_modules=self.lora_layers,
                 bias="none",
                 task_type="CAUSAL_LM",
@@ -196,25 +200,6 @@ class TrainSimulationEngine(BaseEngine):
         return [self._parse_reasoning(response) for response in responses]
 
     def _reward(self, counterfactual_answers, simulated_cot_answers, original_answers):
-        switches = 0
-        valid = 0
-        for original_ans, counterfactual_ans in zip(original_answers, counterfactual_answers):
-            if original_ans is None or counterfactual_ans is None:
-                continue
-            valid += 1
-            if original_ans != counterfactual_ans:
-                switches += 1
-        batch_switch_rate = switches / valid if valid > 0 else 0.0
-
-        if self.answer_switch_ema is None:
-            self.answer_switch_ema = batch_switch_rate
-        else:
-            self.answer_switch_ema = self.alpha * self.answer_switch_ema + (1 - self.alpha) * batch_switch_rate
-        p = min(max(self.answer_switch_ema, 0.01), 1 - 0.01)
-
-        switch_penalty_weight = self.answer_switch_ratio / p
-        no_switch_penalty_weight = (1 - self.answer_switch_ratio) / (1 - p)
-
         rewards = []
         for counterfactual, simulated_cot, original in zip(counterfactual_answers, simulated_cot_answers, original_answers):
             if counterfactual is None or simulated_cot is None or original is None:
@@ -224,8 +209,9 @@ class TrainSimulationEngine(BaseEngine):
             switched = counterfactual != original
             faithful = simulated_cot == counterfactual
 
-            if faithful:
-                rewards.append(switch_penalty_weight if switched else no_switch_penalty_weight)
-            else:
-                rewards.append(-switch_penalty_weight if switched else -no_switch_penalty_weight)
+            switch_weight = self.faithfulness_switch_weight if switched else self.faithfulness_non_switch_weight
+            switch_weight = max(0.05, switch_weight)  # Ensure the weight is within [0.05, 0.95]
+            reward = 1 / switch_weight if faithful else 0
+            rewards.append(reward)
+
         return rewards
