@@ -1,5 +1,6 @@
 import os
 import re
+import torch
 import json
 from engine.base import BaseEngine
 
@@ -23,11 +24,21 @@ class HintFaithfulnessEngine(BaseEngine):
         print(f"Counterfactual question key: {self.counterfactual_question_key}")
 
     def _get_responses(self):
-        self.dataset._to_hf_dataset(
-            tokenizer=None,
-            question_wrapper=self.base_prompt_answer,
-            engine=self
-        )
+        if type(self.dataset) is dict:
+            for k, v in self.dataset.items():
+                v._to_hf_dataset(
+                    tokenizer=None,
+                    question_wrapper=self.base_prompt_answer,
+                    engine=self
+                )
+            datasets_list = list(self.dataset.values())
+            self.dataset = torch.utils.data.ConcatDataset(datasets_list)
+        else:
+            self.dataset._to_hf_dataset(
+                tokenizer=None,
+                question_wrapper=self.base_prompt_answer,
+                engine=self
+            )
 
         GTs = [item["gt"] for item in self.dataset]
         example_indices = [item["example_idx"] for item in self.dataset]

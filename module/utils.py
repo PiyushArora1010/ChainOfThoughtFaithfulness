@@ -30,3 +30,16 @@ def set_seed(seed: int) -> RandomState:
 
 def get_language_model(model_tag, max_tokens=256, temperature=0.7, devices=None):
     return Model(name=model_tag, max_tokens=max_tokens, temperature=temperature, devices=devices)
+class EMA:
+    def __init__(self, value=None, alpha=0.99):
+        self.alpha = alpha
+        self.value = value
+
+    def update(self, new_value):
+        if self.value is None:
+            self.value = new_value
+        else:
+            self.value = self.alpha * self.value + (1 - self.alpha) * new_value
+
+    def __call__(self):
+        return self.value

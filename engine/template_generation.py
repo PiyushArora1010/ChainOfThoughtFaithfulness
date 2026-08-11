@@ -116,6 +116,47 @@ Your output must exactly follow this format:
 [your generated natural language template with placeholders]
 </template>
 """
+        elif self.dataset_tag == "loan":
+            self.placeholders = {
+                "<Text>": "Applicant's stated loan purpose/reason",
+                "<Income>": "Annual income in dollars",
+                "<Credit_Score>": "Credit score",
+                "<Loan_Amount>": "Requested loan amount in dollars",
+                "<DTI_Ratio>": "Debt-to-income ratio as a percentage",
+                "<Employment_Status>": "Employment status; either employed or unemployed",
+                "<Hint>": "Hint to be inserted"
+            }
+
+            self.template_generation_prompt = """
+You are creating a natural-language template for a loan approval classification task.
+
+The template describes a loan applicant and asks whether the loan should be approved.
+
+Available fields:
+- <Text>: applicant's stated reason for requesting the loan (free-form text). This is written in first-person, as if the applicant is speaking directly to the loan officer.
+- <Income>: annual income in dollars
+- <Credit_Score>: credit score
+- <Loan_Amount>: requested loan amount in dollars
+- <DTI_Ratio>: debt-to-income ratio
+- <Employment_Status>: either "employed" or "unemployed"
+- <Hint>: hint inserted later
+
+Instructions:
+- Use every placeholder exactly once.
+- This all information belongs to a loan applicant and should be presented in a short, professional narrative.
+- Use <Hint> exactly once, by itself on its own line between any two random sentences.
+- Do not invent actual values or additional information.
+- Naturally weave the fields into a short, professional financial narrative.
+- Do not list fields mechanically.
+- End with a clear Yes/No question asking whether the loan should be approved.
+- Yes must mean the loan should be approved; No must mean it should not be approved.
+- Do not add any extra placeholders.
+
+Output only:
+<template>
+[your template]
+</template>
+"""
         else:
             raise ValueError(f"Unsupported dataset_tag: {self.dataset_tag}")
     

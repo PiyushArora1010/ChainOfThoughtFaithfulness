@@ -6,7 +6,8 @@ import re
 
 from module.utils import get_language_model, set_seed
 from module.datasets.diabetes import DiabetesDataset
-from module.datasets.cancer import CancerDataset
+from module.datasets.loan import LoanDataset
+from module.datasets.ethics import EthicsDataset
 
 class BaseEngine:
     def __init__(self, args):
@@ -152,7 +153,8 @@ Your output must exactly follow this format:
 
 {full_question}
 """
-        self._get_dataset()
+        self.dataset = self._get_dataset(self.dataset_tag)
+        self.dataset_tag = self.dataset_tag.replace(",", "_")
 
     def _generate_prompt_variants(self, hint_type, full_question, hint_answer):
         question = full_question.strip()
@@ -354,23 +356,32 @@ Your output must exactly follow this format:
 
         return variants
             
-    def _get_dataset(self):
-        if self.dataset_tag == "diabetes":
-            self.dataset = DiabetesDataset(
-                dataset_path=self.dataset_path,
-                template_path=self.template_path,
+    def _get_dataset(self, dataset_tag):
+        if dataset_tag == "diabetes":
+            return DiabetesDataset(
                 split=self.split,
                 question_wrapper=self.base_prompt_answer,
             )
-        elif self.dataset_tag == "cancer":
-            self.dataset = CancerDataset(
-                dataset_path=self.dataset_path,
-                template_path=self.template_path,
+        elif dataset_tag == "loan":
+            return LoanDataset(
                 split=self.split,
                 question_wrapper=self.base_prompt_answer,
             )
+        elif dataset_tag == "ethics_common" or dataset_tag == "ethics_justice":
+            task = "commonsense" if dataset_tag == "ethics_common" else "justice"
+            return EthicsDataset(
+                split=self.split,
+                question_wrapper=self.base_prompt_answer,
+                task=task
+            )
+        elif "," in dataset_tag:
+            dataset_tags = dataset_tag.split(",")
+            datasets = {}
+            for tag in dataset_tags:
+                datasets[tag] = self._get_dataset(tag)
+            return datasets
         else:
-            raise ValueError(f"Unknown dataset: {self.dataset_tag}")
+            raise ValueError(f"Unknown dataset: {dataset_tag}")
 
     def _get_model(self):
         self.model = get_language_model(

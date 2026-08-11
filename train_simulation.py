@@ -59,199 +59,23 @@ async def reward_faithfulness_async(prompts, completions, **kwargs):
         ans for ans in counterfactual_answers for _ in range(engine.completions_per_prompt)
     ]  # repeat answers per completion
 
-    # Update EMAs
-    faithful_switch = sum(1 for i in range(len(original_answers)) if counterfactual_answers[i] != original_answers[i] and simulated_cot_answers[i] == counterfactual_answers[i])
-    faithful_non_switch = sum(1 for i in range(len(original_answers)) if counterfactual_answers[i] == original_answers[i] and simulated_cot_answers[i] == counterfactual_answers[i])
-    answer_switch_count = sum(1 for i in range(len(original_answers)) if counterfactual_answers[i] != original_answers[i])
-
-    if engine.faithfulness_switch_weight is None:
-        engine.faithfulness_switch_weight = faithful_switch / len(original_answers)
-    else:
-        engine.faithfulness_switch_weight = (
-            engine.alpha * engine.faithfulness_switch_weight
-            + (1 - engine.alpha) * (faithful_switch / len(original_answers))
-        )
-
-    if engine.faithfulness_non_switch_weight is None:
-        engine.faithfulness_non_switch_weight = faithful_non_switch / len(original_answers)
-    else:
-        engine.faithfulness_non_switch_weight = (
-            engine.alpha * engine.faithfulness_non_switch_weight
-            + (1 - engine.alpha) * (faithful_non_switch / len(original_answers))
-        )
-
-    if engine.answer_switch_ema is None:
-        engine.answer_switch_ema = answer_switch_count / len(original_answers)
-    else:
-        engine.answer_switch_ema = (
-            engine.alpha * engine.answer_switch_ema
-            + (1 - engine.alpha) * (answer_switch_count / len(original_answers))
-        )
-
     # Faithfulness reward computation
     rewards = engine._reward(counterfactual_answers, simulated_cot_answers, original_answers)
-
-    same_idx = next(
-        (i for i, (cf, orig) in enumerate(zip(counterfactual_answers, original_answers))
-        if cf == orig),
-        None,
-    )
-
-    diff_idx = next(
-        (i for i, (cf, orig) in enumerate(zip(counterfactual_answers, original_answers))
-        if cf != orig),
-        None,
-    )
-
-    example_indices = []
-    if same_idx is not None:
-        example_indices.append(("SAME", same_idx))
-    if diff_idx is not None:
-        example_indices.append(("DIFFERENT", diff_idx))
-
-    for label, idx in example_indices:
-        table = [[
-            original_full_questions[idx],
-            original_cots[idx],
-            original_answers[idx],
-            engine.answer_switch_ema,
-        ]]
-
-        print0(
-            f"\n\n****Original Example ({label})****\n",
-            local_rank=engine.local_rank,
-        )
-        print0(
-            tabulate.tabulate(
-                table,
-                headers=[
-                    "Original Full Question",
-                    "Original CoT",
-                    "Original Answer",
-                    "Answer Switch EMA",
-                ],
-                tablefmt="fancy_grid",
-                maxcolwidths=[40, 60, 30, 20],
-            ),
-            local_rank=engine.local_rank,
-        )
-
-        table = [[
-            counterfactual_full_questions[idx],
-            counterfactual_answers[idx],
-            simulated_reasoning[idx],
-            simulated_cot_answers[idx],
-            rewards[idx],
-        ]]
-
-        print0(
-            f"\n\n****Counterfactual Example ({label})****\n",
-            local_rank=engine.local_rank,
-        )
-        print0(
-            tabulate.tabulate(
-                table,
-                headers=[
-                    "Counterfactual Full Question",
-                    "Counterfactual Answer",
-                    "Simulated Reasoning",
-                    "Simulated CoT Answer",
-                    "Reward",
-                ],
-                tablefmt="fancy_grid",
-                maxcolwidths=[40, 30, 60, 30, 10],
-            ),
-            local_rank=engine.local_rank,
-        )
+    end = time.time()
 
     if engine.local_rank == 0:
-        faithfulness_table = wandb.Table(
-            columns=[
-                "Type",
-                "Original Question",
-                "Original CoT",
-                "Original Answer",
-                "Counterfactual Question",
-                "Counterfactual Answer",
-                "Simulated Reasoning",
-                "Simulated CoT Answer",
-                "Reward",
-            ]
-        )
+        wandb.log({"train/faithfulness_switch": engine.faithfulness_switch()})
+        wandb.log({"train/faithfulness_non_switch": engine.faithfulness_non_switch()})
+        wandb.log({"train/answer_switch": engine.AS_EMA()})
 
-        for label, idx in example_indices:
-            faithfulness_table.add_data(
-                label,
-                original_full_questions[idx],
-                original_cots[idx],
-                original_answers[idx],
-                counterfactual_full_questions[idx],
-                counterfactual_answers[idx],
-                simulated_reasoning[idx],
-                simulated_cot_answers[idx],
-                float(rewards[idx]),
-            )
-
-        wandb.log({"faithfulness/examples": faithfulness_table})
-        wandb.log({"train/answer_switch_ema": engine.answer_switch_ema})
-
-        if_answer_switch = sum(
-            1 for i in range(len(rewards)) if counterfactual_answers[i] != original_answers[i]
-        )
-
-        if if_answer_switch > 0:
-            if engine.faithfulness_switch is None:
-                engine.faithfulness_switch = sum(
-                    1 for i in range(len(rewards)) if (counterfactual_answers[i] != original_answers[i] and rewards[i] > 0)
-                ) / if_answer_switch
-            else:
-                engine.faithfulness_switch = (
-                    engine.alpha * engine.faithfulness_switch
-                    + (1 - engine.alpha) * sum(
-                        1 for i in range(len(rewards)) if (counterfactual_answers[i] != original_answers[i] and rewards[i] > 0)
-                    ) / if_answer_switch
-                )
-
-        if if_answer_switch < len(rewards):
-            if engine.faithfulness_non_switch is None:
-                engine.faithfulness_non_switch = sum(
-                    1 for i in range(len(rewards)) if (counterfactual_answers[i] == original_answers[i] and rewards[i] > 0)
-                ) / (len(rewards) - if_answer_switch)
-            else:
-                engine.faithfulness_non_switch = (
-                    engine.alpha * engine.faithfulness_non_switch
-                    + (1 - engine.alpha) * sum(
-                        1 for i in range(len(rewards)) if (counterfactual_answers[i] == original_answers[i] and rewards[i] > 0)
-                    ) / (len(rewards) - if_answer_switch)
-                )
-
-        wandb.log({"train/faithfulness_switch": engine.faithfulness_switch})
-        wandb.log({"train/faithfulness_non_switch": engine.faithfulness_non_switch})
-
-        end = time.time()
         print0(f"Original Answers: {original_answers}", local_rank=engine.local_rank)
         print0(f"Counterfactual Answers: {counterfactual_answers}", local_rank=engine.local_rank)
         print0(f"Simulated CoT Answers: {simulated_cot_answers}", local_rank=engine.local_rank)
-        print0(f"Faithfulness Rewards: {rewards}", local_rank=engine.local_rank)
+        print0(f"Faithfulness Rewards: {[f'{r:.2f}' for r in rewards]}", local_rank=engine.local_rank)
         print0(
             f"\n\n****Total reward_faithfulness time: {end - start:.2f} seconds****\n",
             local_rank=engine.local_rank,
         )
-
-    return rewards
-
-def reward_correct_answer(prompts, completions, **kwargs):
-    global engine, model, tokenizer
-
-    gts = kwargs["gt"]
-    original_answers = engine._get_answers_from_responses(completions)
-
-    rewards = []    
-    for i in range(len(completions)):
-        if original_answers[i] == gts[i]:
-            rewards.append(1.0)
-        else:
-            rewards.append(0.0)
 
     return rewards
 
@@ -265,60 +89,23 @@ async def reward_base_answer_async(prompts, completions, **kwargs):
     unique_prompts = [
         prompts[i] for i in range(0, len(completions), engine.completions_per_prompt)
     ]
-    base_responses_unique, base_answers_unique = await engine._get_base_responses(unique_prompts)
-    base_responses = [r for r in base_responses_unique for _ in range(engine.completions_per_prompt)]
+    _, base_answers_unique = await engine._get_base_responses(unique_prompts)
     base_answers = [a for a in base_answers_unique for _ in range(engine.completions_per_prompt)]
 
     rewards = []    
     for i in range(len(completions)):
         if base_answers[i] == original_answers[i]:
-            rewards.append(0.5)
-            if original_answers[i] == gts[i]:
-                rewards[-1] += 0.5  # Bonus for matching ground truth
+            rewards.append(1.0)
         else:
             rewards.append(0.0)
 
-    table = [[
-        base_responses[0],
-        base_answers[0],
-        original_answers[0],
-        gts[0],
-        rewards[0],
-    ]]
-    print0("\n\n****Base Model Response and Answer****\n", local_rank=engine.local_rank)
-    print0(
-        tabulate.tabulate(
-            table,
-            headers=["Base Model Response", "Base Model Answer", "Original Answer", "Ground Truth", "Reward"],
-            tablefmt="fancy_grid",
-            maxcolwidths=[60, 30, 30, 30, 10],
-        ),
-        local_rank=engine.local_rank,
-    )
-    if engine.local_rank == 0:
-        base_table = wandb.Table(
-            columns=[
-                "Base Model Response",
-                "Base Model Answer",
-                "Original Answer",
-                "Ground Truth",
-                "Reward",
-            ]
-        )
+    print0(f"Base Model Answers: {base_answers}", local_rank=engine.local_rank)
+    print0(f"Original Answers: {original_answers}", local_rank=engine.local_rank)
+    print0(f"Ground Truths: {gts}", local_rank=engine.local_rank)
+    print0(f"Rewards: {[f'{r:.2f}' for r in rewards]}", local_rank=engine.local_rank)
 
-        base_table.add_data(
-            base_responses[0],
-            base_answers[0],
-            original_answers[0],
-            gts[0],
-            float(rewards[0])
-        )
-
-        wandb.log({
-            "base_model/example": base_table,
-        })
     end = time.time()
-    print0(f"\n\n****Total reward_base_answer time: {end -start:.2f} seconds****\n", local_rank=engine.local_rank)
+    print0(f"\n\n****Total reward_base_answer time: {end-start:.2f} seconds****\n", local_rank=engine.local_rank)
     return rewards
 
 def reward_format(prompts, completions, **kwargs):
@@ -379,14 +166,8 @@ parser.add_argument('--lora_layers', type=str, nargs='+', default=None)
 
 # Data settings
 parser.add_argument('--dataset_tag', type=str, default='ethics')
-parser.add_argument('--dataset_path', type=str, default='data/e-SNLI')
-parser.add_argument('--template_path', type=str, default=None)
-parser.add_argument('--concept_cf', action='store_true')
 parser.add_argument('--hint_cf', action='store_true')
-parser.add_argument('--hint_cf_ratio', type=float, default=0.5, help="Ratio of hinted items to total items in the dataset")
-parser.add_argument('--counterfactual_data_path', type=str, default="results/concept_outputs/bbq/Llama3.3_70B")
 parser.add_argument('--split', type=str, default='train')
-parser.add_argument('--sample_size', type=int, default=None, help="Number of examples")
 parser.add_argument('--seed', type=int, default=0)
 
 parser.add_argument('--resume_from_checkpoint', type=str, default=None, help="Path to a checkpoint to resume training from")

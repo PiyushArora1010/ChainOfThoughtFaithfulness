@@ -10,7 +10,7 @@ from transformers import (
     AutoTokenizer,
 )
 from peft import LoraConfig, get_peft_model
-
+from module.utils import print0, EMA
 class TrainSimulationEngine(BaseEngine):
     def __init__(self, args):
         super().__init__(args)
@@ -22,15 +22,14 @@ class TrainSimulationEngine(BaseEngine):
             args.run_name
         )
         os.makedirs(self.output_dir, exist_ok=True)
-
-        self.implied_client = None
-        print(f"Answer switch EMA initialized to: {self.answer_switch_ema}")
         self.alpha = 0.99
-        self.faithfulness_switch = None
-        self.faithfulness_non_switch = None
+        self.implied_client = None
 
-        self.faithfulness_switch_weight = None
-        self.faithfulness_non_switch_weight = None
+        self.AS_EMA = EMA(value=self.answer_switch_ema, alpha=self.alpha)
+        print0(f"Answer switch EMA initialized to: {self.AS_EMA()}", local_rank=self.local_rank)
+        
+        self.faithfulness_switch = EMA(value=None, alpha=self.alpha)
+        self.faithfulness_non_switch = EMA(value=None, alpha=self.alpha)
 
         self._get_implied_client()
         self._get_base_client()
@@ -118,21 +117,40 @@ class TrainSimulationEngine(BaseEngine):
         model = model.to(self.device)
 
         return model, tokenizer
-    
+        
     def _prepare_datasets(self, tokenizer):
-        self.dataset._to_hf_dataset(
-            tokenizer=tokenizer,
-            question_wrapper=self.base_prompt_answer,
-            engine=self
-        )
+        if type(self.dataset) is dict:
+            for k, v in self.dataset.items():
+                v._to_hf_dataset(
+                    tokenizer=None,
+                    question_wrapper=self.base_prompt_answer,
+                    engine=self
+                )
 
-        train_size = len(self.dataset) - 50
-        val_size = 50
-        train_dataset, val_dataset = torch.utils.data.random_split(
-            self.dataset,
-            [train_size, val_size],
-            generator=torch.Generator().manual_seed(self.seed)
-        )
+            datasets_list = list(self.dataset.values())
+            dataset = torch.utils.data.ConcatDataset(datasets_list)
+            train_size = len(dataset) - 50
+            val_size = 50
+            train_dataset, val_dataset = torch.utils.data.random_split(
+                dataset,
+                [train_size, val_size],
+                generator=torch.Generator().manual_seed(self.seed)
+            )
+        else:
+            self.dataset._to_hf_dataset(
+                tokenizer=tokenizer,
+                question_wrapper=self.base_prompt_answer,
+                engine=self
+            )
+
+            train_size = len(self.dataset) - 50
+            val_size = 50
+            train_dataset, val_dataset = torch.utils.data.random_split(
+                self.dataset,
+                [train_size, val_size],
+                generator=torch.Generator().manual_seed(self.seed)
+            )
+
         return train_dataset, val_dataset
                 
     def _get_model_responses(self, model, tokenizer, prompts, **kwargs):
@@ -199,8 +217,22 @@ class TrainSimulationEngine(BaseEngine):
     def _get_reasoning_from_responses(self, responses):
         return [self._parse_reasoning(response) for response in responses]
 
+    def _reward_switch(self):
+        if self.AS_EMA() <= self.answer_switch_ratio:
+            return (1 - self.AS_EMA() / (2 * self.answer_switch_ratio))
+        else:
+            return (1 - self.AS_EMA()) / (2 * (1 - self.answer_switch_ratio))
+
     def _reward(self, counterfactual_answers, simulated_cot_answers, original_answers):
         rewards = []
+        meta_data = {
+            "faithful_switch": 0,
+            "faithful_non_switch": 0,
+            "unfaithful_switch": 0,
+            "unfaithful_non_switch": 0,
+            "total_switch": 0,
+            "total_non_switch": 0,
+        }
         for counterfactual, simulated_cot, original in zip(counterfactual_answers, simulated_cot_answers, original_answers):
             if counterfactual is None or simulated_cot is None or original is None:
                 rewards.append(0)
@@ -209,9 +241,28 @@ class TrainSimulationEngine(BaseEngine):
             switched = counterfactual != original
             faithful = simulated_cot == counterfactual
 
-            switch_weight = self.faithfulness_switch_weight if switched else self.faithfulness_non_switch_weight
-            switch_weight = max(0.05, switch_weight)  # Ensure the weight is within [0.05, 0.95]
-            reward = 1 / switch_weight if faithful else 0
-            rewards.append(reward)
+            reward = self._reward_switch() if switched else (1 - self._reward_switch())
+            rewards.append(reward if faithful else 0)
+
+            # Update meta_data
+            if switched:
+                meta_data["total_switch"] += 1
+                if faithful:
+                    meta_data["faithful_switch"] += 1
+                else:
+                    meta_data["unfaithful_switch"] += 1
+            else:
+                meta_data["total_non_switch"] += 1
+                if faithful:
+                    meta_data["faithful_non_switch"] += 1
+                else:
+                    meta_data["unfaithful_non_switch"] += 1
+
+        if meta_data["total_switch"] > 0:
+            self.faithfulness_switch.update(meta_data["faithful_switch"] / meta_data["total_switch"])
+        if meta_data["total_non_switch"] > 0:
+            self.faithfulness_non_switch.update(meta_data["faithful_non_switch"] / meta_data["total_non_switch"])
+        if (meta_data["total_switch"] + meta_data["total_non_switch"]) > 0:
+            self.AS_EMA.update(meta_data["total_switch"] / (meta_data["total_switch"] + meta_data["total_non_switch"]))
 
         return rewards
