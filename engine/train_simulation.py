@@ -131,29 +131,14 @@ class TrainSimulationEngine(BaseEngine):
 
             datasets_list = list(self.dataset.values())
             dataset = torch.utils.data.ConcatDataset(datasets_list)
-            train_size = len(dataset) - 50
-            val_size = 50
-            train_dataset, val_dataset = torch.utils.data.random_split(
-                dataset,
-                [train_size, val_size],
-                generator=torch.Generator().manual_seed(self.seed)
-            )
+            return dataset
         else:
             self.dataset._to_hf_dataset(
                 tokenizer=tokenizer,
                 question_wrapper=self.base_prompt_answer,
                 engine=self
             )
-
-            train_size = len(self.dataset) - 50
-            val_size = 50
-            train_dataset, val_dataset = torch.utils.data.random_split(
-                self.dataset,
-                [train_size, val_size],
-                generator=torch.Generator().manual_seed(self.seed)
-            )
-
-        return train_dataset, val_dataset
+            return self.dataset
                 
     def _get_model_responses(self, model, tokenizer, prompts, **kwargs):
         model_inputs = tokenizer(

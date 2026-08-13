@@ -212,10 +212,8 @@ if __name__ == '__main__':
     model, tokenizer = engine._get_model_and_tokenizer()
 
     # Prepare datasets
-    train_dataset, val_dataset = engine._prepare_datasets(tokenizer)
-
+    train_dataset = engine._prepare_datasets(tokenizer)
     print0(f"Train dataset size: {len(train_dataset)}", local_rank=engine.local_rank)
-    print0(f"Validation dataset size: {len(val_dataset)}", local_rank=engine.local_rank)
 
     max_prompt_length = args.max_prompt_length
     max_seq_length = args.max_seq_length
@@ -316,7 +314,6 @@ if __name__ == '__main__':
         args=training_args,
 
         train_dataset=train_dataset,
-        eval_dataset=val_dataset,
 
         reward_funcs=[
             reward_base_answer_async,
