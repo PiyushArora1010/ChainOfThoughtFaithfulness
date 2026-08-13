@@ -124,7 +124,7 @@ class TrainSimulationEngine(BaseEngine):
         if type(self.dataset) is dict:
             for k, v in self.dataset.items():
                 v._to_hf_dataset(
-                    tokenizer=None,
+                    tokenizer=tokenizer,
                     question_wrapper=self.base_prompt_answer,
                     engine=self
                 )
