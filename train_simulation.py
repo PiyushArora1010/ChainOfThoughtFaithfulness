@@ -63,19 +63,20 @@ async def reward_faithfulness_async(prompts, completions, **kwargs):
     rewards = engine._reward(counterfactual_answers, simulated_cot_answers, original_answers)
     end = time.time()
 
-    if engine.local_rank == 0:
+    if engine.local_rank == 0 and engine.wandb:
         wandb.log({"train/faithfulness_switch": engine.faithfulness_switch()})
         wandb.log({"train/faithfulness_non_switch": engine.faithfulness_non_switch()})
         wandb.log({"train/answer_switch": engine.AS_EMA()})
-
-        print0(f"Original Answers: {original_answers}", local_rank=engine.local_rank)
-        print0(f"Counterfactual Answers: {counterfactual_answers}", local_rank=engine.local_rank)
-        print0(f"Simulated CoT Answers: {simulated_cot_answers}", local_rank=engine.local_rank)
-        print0(f"Faithfulness Rewards: {[f'{r:.2f}' for r in rewards]}", local_rank=engine.local_rank)
-        print0(
-            f"\n\n****Total reward_faithfulness time: {end - start:.2f} seconds****\n",
-            local_rank=engine.local_rank,
-        )
+        wandb.log({"train/answer_switch_ratio": engine.AS_EMA_BASE()})
+        
+    print0(f"Original Answers: {original_answers}", local_rank=engine.local_rank)
+    print0(f"Counterfactual Answers: {counterfactual_answers}", local_rank=engine.local_rank)
+    print0(f"Simulated CoT Answers: {simulated_cot_answers}", local_rank=engine.local_rank)
+    print0(f"Faithfulness Rewards: {[f'{r:.2f}' for r in rewards]}", local_rank=engine.local_rank)
+    print0(
+        f"\n\n****Total reward_faithfulness time: {end - start:.2f} seconds****\n",
+        local_rank=engine.local_rank,
+    )
 
     return rewards
 
@@ -129,8 +130,6 @@ async def reward_base_answer_async(prompts, completions, **kwargs):
 
     if meta_data["switch"] + meta_data["non_switch"] > 0:
         engine.AS_EMA_BASE.update(meta_data["switch"] / (meta_data["switch"] + meta_data["non_switch"]))
-        wandb.log({"train/answer_switch_ratio": engine.AS_EMA_BASE()})
-        print0(f"Answer switch ratio EMA updated to: {engine.AS_EMA_BASE()}", local_rank=engine.local_rank)
 
     end = time.time()
     print0(f"\n\n****Total reward_base_answer time: {end-start:.2f} seconds****\n", local_rank=engine.local_rank)
@@ -183,6 +182,7 @@ parser.add_argument('--answer_switch_ema', type=float, default=None, help="Initi
 # Save and Logging settings
 parser.add_argument('--run_name', type=str, default=None)
 parser.add_argument('--output_dir', type=str, default='deleteme')
+parser.add_argument('--wandb', action='store_true', help="Log to Weights & Biases")
 parser.add_argument('--logging_steps', type=int, default=1)
 parser.add_argument('--save_steps', type=int, default=25)
 parser.add_argument('--eval_steps', type=int, default=25)
@@ -222,7 +222,7 @@ if __name__ == '__main__':
 
     RUN_NAME = engine.run_name
 
-    if engine.local_rank == 0:
+    if engine.local_rank == 0 and engine.wandb:
         wandb.init(
             project="Faithfulness ISO",
             name=RUN_NAME,  
@@ -263,7 +263,7 @@ if __name__ == '__main__':
         eval_strategy="steps",
         eval_steps=args.eval_steps,
         save_steps=args.save_steps,
-        report_to="wandb" if engine.local_rank == 0 else "none",
+        report_to="wandb" if (args.wandb and engine.local_rank == 0) else "none",
         run_name=RUN_NAME,
         output_dir=engine.output_dir,
 
