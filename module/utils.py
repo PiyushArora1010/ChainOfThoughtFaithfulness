@@ -30,6 +30,7 @@ def set_seed(seed: int) -> RandomState:
 
 def get_language_model(model_tag, max_tokens=256, temperature=0.7, devices=None):
     return Model(name=model_tag, max_tokens=max_tokens, temperature=temperature, devices=devices)
+
 class EMA:
     def __init__(self, value=None, alpha=0.99):
         self.alpha = alpha

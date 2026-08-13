@@ -89,20 +89,48 @@ async def reward_base_answer_async(prompts, completions, **kwargs):
     unique_prompts = [
         prompts[i] for i in range(0, len(completions), engine.completions_per_prompt)
     ]
-    _, base_answers_unique = await engine._get_base_responses(unique_prompts)
+    counterfactual_unique_prompts = [
+        kwargs["counterfactual_prompt"][i]
+        for i in range(0, len(completions), engine.completions_per_prompt)
+    ]
+
+    _, base_answers_unique = await engine._get_base_responses(
+        unique_prompts + counterfactual_unique_prompts
+    )
+    base_answers_unique, counterfactual_base_answers_unique = base_answers_unique[:len(unique_prompts)], base_answers_unique[len(unique_prompts):]
+
     base_answers = [a for a in base_answers_unique for _ in range(engine.completions_per_prompt)]
+    counterfactual_base_answers = [a for a in counterfactual_base_answers_unique for _ in range(engine.completions_per_prompt)]
 
     rewards = []    
+    meta_data = {
+        "switch": 0,
+        "non_switch": 0,
+    }
     for i in range(len(completions)):
-        if base_answers[i] == original_answers[i]:
+        if base_answers[i] == None or original_answers[i] == None:
+            rewards.append(0)
+            continue
+        elif base_answers[i] == original_answers[i]:
             rewards.append(1.0)
         else:
             rewards.append(0.0)
 
+        if base_answers[i] != counterfactual_base_answers[i]:
+            meta_data["switch"] += 1
+        else:
+            meta_data["non_switch"] += 1
+
     print0(f"Base Model Answers: {base_answers}", local_rank=engine.local_rank)
+    print0(f"Counterfactual Base Model Answers: {counterfactual_base_answers}", local_rank=engine.local_rank)
     print0(f"Original Answers: {original_answers}", local_rank=engine.local_rank)
     print0(f"Ground Truths: {gts}", local_rank=engine.local_rank)
     print0(f"Rewards: {[f'{r:.2f}' for r in rewards]}", local_rank=engine.local_rank)
+
+    if meta_data["switch"] + meta_data["non_switch"] > 0:
+        engine.AS_EMA_BASE.update(meta_data["switch"] / (meta_data["switch"] + meta_data["non_switch"]))
+        wandb.log({"train/answer_switch_ratio": engine.AS_EMA_BASE()})
+        print0(f"Answer switch ratio EMA updated to: {engine.AS_EMA_BASE()}", local_rank=engine.local_rank)
 
     end = time.time()
     print0(f"\n\n****Total reward_base_answer time: {end-start:.2f} seconds****\n", local_rank=engine.local_rank)
