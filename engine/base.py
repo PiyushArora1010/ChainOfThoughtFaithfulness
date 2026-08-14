@@ -8,6 +8,7 @@ from module.utils import get_language_model, set_seed
 from module.datasets.diabetes import DiabetesDataset
 from module.datasets.loan import LoanDataset
 from module.datasets.ethics import EthicsDataset
+from module.datasets.snli import SNLIDataset
 
 class BaseEngine:
     def __init__(self, args):
@@ -335,6 +336,11 @@ Your output must exactly follow this format:
                 split=self.split,
                 question_wrapper=self.base_prompt_answer,
                 task=task
+            )
+        elif dataset_tag == "snli":
+            return SNLIDataset(
+                split=self.split,
+                question_wrapper=self.base_prompt_answer,
             )
         elif "," in dataset_tag:
             dataset_tags = dataset_tag.split(",")
