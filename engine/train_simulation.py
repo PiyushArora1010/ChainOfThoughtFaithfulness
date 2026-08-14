@@ -10,7 +10,8 @@ from transformers import (
     AutoTokenizer,
 )
 from peft import LoraConfig, get_peft_model
-from module.utils import print0, EMA
+from module.utils import print0, EMA, AverageMeter
+
 class TrainSimulationEngine(BaseEngine):
     def __init__(self, args):
         super().__init__(args)
@@ -26,7 +27,7 @@ class TrainSimulationEngine(BaseEngine):
         self.implied_client = None
 
         self.AS_EMA = EMA(value=self.answer_switch_ema, alpha=self.alpha)
-        self.AS_EMA_BASE = EMA(value=self.answer_switch_ratio, alpha=self.alpha)
+        self.AS_EMA_BASE = AverageMeter(value=self.answer_switch_ratio, count=1, patience=20)
         print0(f"Answer switch EMA initialized to: {self.AS_EMA()}", local_rank=self.local_rank)
         print0(f"Answer switch ratio EMA initialized to: {self.AS_EMA_BASE()}", local_rank=self.local_rank)
         

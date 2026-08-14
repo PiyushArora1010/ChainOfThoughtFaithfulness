@@ -44,3 +44,21 @@ class EMA:
 
     def __call__(self):
         return self.value
+
+class AverageMeter:
+    def __init__(self, value=None, count=0, patience=20):
+        self.mean = value
+        self.count = count
+        self.patience = patience
+        self.initial_value = value
+
+    def update(self, new_value):
+        if self.mean is None:
+            self.mean = new_value
+            self.count = 1
+        else:
+            self.mean = (self.mean * self.count) / (self.count + 1) + new_value / (self.count + 1)
+            self.count += 1
+
+    def __call__(self):
+        return self.mean if self.count > self.patience else self.initial_value
