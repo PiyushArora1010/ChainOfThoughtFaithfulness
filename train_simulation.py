@@ -73,6 +73,10 @@ async def reward_faithfulness_async(prompts, completions, **kwargs):
     print0(f"Counterfactual Answers: {counterfactual_answers}", local_rank=engine.local_rank)
     print0(f"Simulated CoT Answers: {simulated_cot_answers}", local_rank=engine.local_rank)
     print0(f"Faithfulness Rewards: {[f'{r:.2f}' for r in rewards]}", local_rank=engine.local_rank)
+    print0(f"Answer Switch EMA: {engine.AS_EMA():.4f}", local_rank=engine.local_rank)
+    print0(f"Answer Switch EMA Base: {engine.AS_EMA_BASE():.4f}", local_rank=engine.local_rank)
+    print0(f"Faithfulness Switch: {engine.faithfulness_switch()}", local_rank=engine.local_rank)
+    print0(f"Faithfulness Non-Switch: {engine.faithfulness_non_switch()}", local_rank=engine.local_rank)
     print0(
         f"\n\n****Total reward_faithfulness time: {end - start:.2f} seconds****\n",
         local_rank=engine.local_rank,
@@ -90,8 +94,9 @@ async def reward_base_answer_async(prompts, completions, **kwargs):
     unique_prompts = [
         prompts[i] for i in range(0, len(completions), engine.completions_per_prompt)
     ]
+    counterfactual_prompts_all = kwargs["counterfactual_prompt"] if random.random() < 0.5 else kwargs["original_prompt"]
     counterfactual_unique_prompts = [
-        kwargs["counterfactual_prompt"][i]
+        counterfactual_prompts_all[i]
         for i in range(0, len(completions), engine.completions_per_prompt)
     ]
 
