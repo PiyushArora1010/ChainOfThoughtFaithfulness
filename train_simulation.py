@@ -182,6 +182,7 @@ parser.add_argument('--gradient_accumulation_steps', type=int, default=1)
 parser.add_argument('--completions_per_prompt', type=int, default=6)
 parser.add_argument('--reward_weights', type=float, nargs='+', default=[1.0, 1.0, 1.0], help="Weights for the reward functions: [base_answer, faithfulness, format]")
 parser.add_argument('--answer_switch_ratio', type=float, default=0.5, help="Ratio of answer switches to total examples in the dataset")
+parser.add_argument('--answer_switch_factor', type=float, default=1.0, help="Factor to scale the answer switch EMA for reward computation")
 parser.add_argument('--answer_switch_ema', type=float, default=None, help="Initial value for the exponential moving average of answer switches")
 
 # Save and Logging settings

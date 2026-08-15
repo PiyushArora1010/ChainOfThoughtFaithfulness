@@ -27,7 +27,7 @@ class TrainSimulationEngine(BaseEngine):
         self.implied_client = None
 
         self.AS_EMA = EMA(value=self.answer_switch_ema, alpha=self.alpha)
-        self.AS_EMA_BASE = AverageMeter(value=self.answer_switch_ratio, count=1, patience=20)
+        self.AS_EMA_BASE = AverageMeter(value=self.answer_switch_ratio, count=1, patience=100)
         print0(f"Answer switch EMA initialized to: {self.AS_EMA()}", local_rank=self.local_rank)
         print0(f"Answer switch ratio EMA initialized to: {self.AS_EMA_BASE()}", local_rank=self.local_rank)
         
@@ -206,10 +206,11 @@ class TrainSimulationEngine(BaseEngine):
         return [self._parse_reasoning(response) for response in responses]
 
     def _reward_switch(self):
-        if self.AS_EMA() <= self.AS_EMA_BASE():
-            return (1 - self.AS_EMA() / (2 * self.AS_EMA_BASE()))
+        THRESH = self.AS_EMA_BASE() * self.answer_switch_factor
+        if self.AS_EMA() <= THRESH:
+            return (1 - self.AS_EMA() / (2 * THRESH))
         else:
-            return (1 - self.AS_EMA()) / (2 * (1 - self.AS_EMA_BASE()))
+            return (1 - self.AS_EMA()) / (2 * (1 - THRESH))
 
     def _reward(self, counterfactual_answers, simulated_cot_answers, original_answers):
         rewards = []
