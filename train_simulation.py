@@ -1,9 +1,12 @@
 import time
 import random
-import tabulate
 import asyncio
 import wandb
 import argparse
+import textwrap
+
+from tabulate import tabulate
+
 from engine.train_simulation import TrainSimulationEngine
 
 from module.utils import print0, set_seed
@@ -68,7 +71,26 @@ async def reward_faithfulness_async(prompts, completions, **kwargs):
         wandb.log({"train/faithfulness_non_switch": engine.faithfulness_non_switch()})
         wandb.log({"train/answer_switch": engine.AS_EMA()})
         wandb.log({"train/answer_switch_ratio": engine.AS_EMA_BASE()})
-        
+
+
+    data2print = {
+        "Original Question": original_full_questions[0],
+        "Counterfactual Question": counterfactual_full_questions[0],
+        "Original CoT": original_cots[0],
+        "Original Answer": original_answers[0],
+        "Counterfactual Answer": counterfactual_answers[0],
+        "Simulated Answer": simulated_cot_answers[0],
+    }
+    # use tabulate to print the data in a table format and make sure the table is not too wide and different columns have different widths
+    widths = [35, 35, 50, 8, 8, 8]
+    headers = list(data2print.keys())
+    values = [
+        textwrap.fill(str(v), width=w)
+        for v, w in zip(data2print.values(), widths)
+    ]
+
+    print0(tabulate([values], headers=headers, tablefmt="grid"), local_rank=engine.local_rank)
+    print0(f"Faithfulness Rewards: {[f'{r:.2f}' for r in rewards]}", local_rank=engine.local_rank)
     print0(f"Original Answers: {original_answers}", local_rank=engine.local_rank)
     print0(f"Counterfactual Answers: {counterfactual_answers}", local_rank=engine.local_rank)
     print0(f"Simulated CoT Answers: {simulated_cot_answers}", local_rank=engine.local_rank)
