@@ -74,20 +74,16 @@ async def reward_faithfulness_async(prompts, completions, **kwargs):
 
 
     data2print = {
-        "Original Question": original_full_questions[0],
-        "Counterfactual Question": counterfactual_full_questions[0],
-        "Original CoT": original_cots[0],
-        "Original Answer": original_answers[0],
-        "Counterfactual Answer": counterfactual_answers[0],
-        "Simulated Answer": simulated_cot_answers[0],
+        "O. Q.": original_full_questions[0],
+        "C. Q.": counterfactual_full_questions[0],
+        "O. CoT": original_cots[0],
+        "O. A.": original_answers[0],
+        "C. A.": counterfactual_answers[0],
+        "S. A.": simulated_cot_answers[0],
     }
-    # use tabulate to print the data in a table format and make sure the table is not too wide and different columns have different widths
-    widths = [35, 35, 50, 8, 8, 8]
+    
     headers = list(data2print.keys())
-    values = [
-        textwrap.fill(str(v), width=w)
-        for v, w in zip(data2print.values(), widths)
-    ]
+    values = [v for v in data2print.values()]
 
     print0(tabulate([values], headers=headers, tablefmt="grid"), local_rank=engine.local_rank)
     print0(f"Faithfulness Rewards: {[f'{r:.2f}' for r in rewards]}", local_rank=engine.local_rank)
@@ -155,8 +151,9 @@ async def reward_base_answer_async(prompts, completions, **kwargs):
     print0(f"Ground Truths: {gts}", local_rank=engine.local_rank)
     print0(f"Rewards: {[f'{r:.2f}' for r in rewards]}", local_rank=engine.local_rank)
 
-    if meta_data["switch"] + meta_data["non_switch"] > 0:
-        engine.AS_EMA_BASE.update(meta_data["switch"] / (meta_data["switch"] + meta_data["non_switch"]))
+    if engine.update_answer_switch_ratio:
+        if meta_data["switch"] + meta_data["non_switch"] > 0:
+            engine.AS_EMA_BASE.update(meta_data["switch"] / (meta_data["switch"] + meta_data["non_switch"]))
 
     end = time.time()
     print0(f"\n\n****Total reward_base_answer time: {end-start:.2f} seconds****\n", local_rank=engine.local_rank)
@@ -166,13 +163,25 @@ def reward_format(prompts, completions, **kwargs):
     global tokenizer, engine
     rewards = []
     avg_token_len = 0
+    max_len = engine.max_seq_length
+    half_len = max_len / 2
+
     for completion in completions:
         num_tokens = len(tokenizer.encode(completion))
         avg_token_len += num_tokens
+
         if "<reasoning>" in completion and "</reasoning>" in completion and "<answer>" in completion and "</answer>" in completion:
-            rewards.append(1.0 * (num_tokens <= engine.max_seq_length))  # Reward only if the completion is well-formatted and within token limit
+            if num_tokens <= half_len:
+                length_factor = 1.0
+            elif num_tokens >= max_len:
+                length_factor = 0.0
+            else:
+                # linearly interpolate from 1.0 down to 0.0 between half_len and max_len
+                length_factor = 1.0 - (num_tokens - half_len) / (max_len - half_len)
+            rewards.append(length_factor)
         else:
             rewards.append(0.0)
+
     print0(f"\n\n****Average token length of completions: {avg_token_len / len(completions):.2f} tokens****\n", local_rank=engine.local_rank)
     return rewards
 
@@ -204,6 +213,7 @@ parser.add_argument('--gradient_accumulation_steps', type=int, default=1)
 parser.add_argument('--completions_per_prompt', type=int, default=6)
 parser.add_argument('--reward_weights', type=float, nargs='+', default=[1.0, 1.0, 1.0], help="Weights for the reward functions: [base_answer, faithfulness, format]")
 parser.add_argument('--answer_switch_ratio', type=float, default=0.5, help="Ratio of answer switches to total examples in the dataset")
+parser.add_argument('--update_answer_switch_ratio', action='store_true', help="Whether to update the answer switch ratio during training")
 parser.add_argument('--answer_switch_factor', type=float, default=1.0, help="Factor to scale the answer switch EMA for reward computation")
 parser.add_argument('--answer_switch_ema', type=float, default=None, help="Initial value for the exponential moving average of answer switches")
 
@@ -303,7 +313,7 @@ if __name__ == '__main__':
         # },
 
         # GRPO-specific
-        beta=0.01,
+        beta=0,
         loss_type="luspo",
         epsilon=2e-3, # section 5.1 of the paper
         epsilon_high=2.5e-3, # section 5.1 of the paper

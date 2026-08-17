@@ -29,14 +29,11 @@ class SNLIDataset(TorchDataset):
 
         self.bins = {}
 
-        # Single task: natural language inference (entailment vs contradiction)
-        self.question_prefix = (
-            "You are a natural language inference assistant. Given a premise and "
-            "a hypothesis, determine whether the hypothesis is entailed by the "
-            "premise (i.e. it must be true given the premise) or whether it "
-            "contradicts the premise. Answer 'Yes' if the relationship is "
-            "entailment, or 'No' if the relationship is contradiction."
-        )
+        self.question_prefix = """You are a natural language inference assistant. Given a premise and a hypothesis, determine whether the hypothesis is entailed by the premise or whether it contradicts the premise."""
+
+        self.question_templates = {
+            "snli": "Based on the above premise and hypothesis, is the hypothesis entailed by the premise?",
+        }
 
         self.split = split
         self._hf_split = "test" if split in ("test", "validation") else "train"
@@ -70,7 +67,7 @@ class SNLIDataset(TorchDataset):
 
     def _apply_natural_language_template(self, data, template, hint=""):
         output = str(template)
-        # output = " ".join(output.split())
+        output = " ".join(output.split())
 
         for key in self.meta_data.keys():
             value = data[key.lower()]
@@ -78,6 +75,9 @@ class SNLIDataset(TorchDataset):
             output = output.replace(f"<{key}>", str(value))
         output = output.replace("<Hint>", hint)
         output = output.replace("<hint>", hint)
+        if not output.endswith(" "):
+            output += " "
+        output += self.question_templates["snli"]
         return output
 
     def _format_question(self, row, template, hint=""):
@@ -91,7 +91,10 @@ class SNLIDataset(TorchDataset):
 
     def _load_data(self):
         data = []
-        default_template = "\nPremise: \"<Premise>\"\nHypothesis: \"<Hypothesis>\"\n<Hint>"
+        default_template = [
+            "\nPremise: \"<Premise>\"\nHypothesis: \"<Hypothesis>\"\n<Hint>",
+            "\n<Hint>\nPremise: \"<Premise>\"\nHypothesis: \"<Hypothesis>\""
+        ]
 
         for idx in range(len(self.df)):
             row = self.df.iloc[idx]
@@ -100,7 +103,7 @@ class SNLIDataset(TorchDataset):
             if len(self.templates) > 0:
                 data_dict["template"] = self.templates[idx % len(self.templates)]
             else:
-                data_dict["template"] = default_template
+                data_dict["template"] = random.choice(default_template)
 
             data_dict["question"] = self._format_question(row, template=data_dict["template"], hint="")
             data_dict["gt"] = "A" if row["Outcome"] == 1 else "B"

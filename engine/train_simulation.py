@@ -132,6 +132,18 @@ class TrainSimulationEngine(BaseEngine):
 
             datasets_list = list(self.dataset.values())
             dataset = torch.utils.data.ConcatDataset(datasets_list)
+
+            weights = []
+            for d in datasets_list:
+                n = len(d)
+                weights.extend([1.0 / n] * n)
+
+            self.sampler = torch.utils.data.WeightedRandomSampler(
+                weights=weights,
+                num_samples=len(weights),
+                replacement=True
+            )
+
             return dataset
         else:
             self.dataset._to_hf_dataset(
@@ -139,6 +151,7 @@ class TrainSimulationEngine(BaseEngine):
                 question_wrapper=self.base_prompt_answer,
                 engine=self
             )
+            self.sampler = None
             return self.dataset
                 
     def _get_model_responses(self, model, tokenizer, prompts, **kwargs):
